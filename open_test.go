@@ -4,8 +4,12 @@ import (
 	"testing"
 )
 
+const (
+	FrameBufferDeviceFile = "/dev/fb0"
+)
+
 func TestFbOpen(t *testing.T) {
-	fb, err := Open("/dev/fb0")
+	fb, err := Open(FrameBufferDeviceFile)
 	/*
 		This should result in a frame
 		buffer (fb) device.
