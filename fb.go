@@ -19,6 +19,7 @@ struct fb_var_screeninfo getVarScreenInfo(int fd) {
 import "C"
 import (
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"os"
@@ -48,19 +49,41 @@ func Open(device string) (*Device, error) {
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED,
 	)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
+	detectColorMode := func(
+		roff C.uint, goff C.uint, boff C.uint,
+		rlen C.uint, glen C.uint, blen C.uint,
+		rmsb C.uint, gmsb C.uint, bmsb C.uint) bool {
+		/*
+				Detect the color mode based on the given inputs...
 
-	var colorModel color.Model
-	if varInfo.red.offset == 11 && varInfo.red.length == 5 && varInfo.red.msb_right == 0 &&
-		varInfo.green.offset == 5 && varInfo.green.length == 6 && varInfo.green.msb_right == 0 &&
-		varInfo.blue.offset == 0 && varInfo.blue.length == 5 && varInfo.blue.msb_right == 0 {
-		colorModel = rgb565ColorModel{}
-	} else {
-		return nil, errors.New("unsupported color model")
+					color|offset|length|msb_right
+			          red| roff |rlen  |rmsb
+			        green| goff |glen  |gmsb
+			         blue| boff |blen  |bmsb
+				return bool (true: detected, false: not detected).
+		*/
+		return varInfo.red.offset == roff && varInfo.red.length == rlen && varInfo.red.msb_right == rmsb &&
+			varInfo.green.offset == goff && varInfo.green.length == glen && varInfo.green.msb_right == gmsb &&
+			varInfo.blue.offset == boff && varInfo.blue.length == blen && varInfo.blue.msb_right == bmsb
 	}
-
+	var colorModel color.Model
+	if detectColorMode(11, 5, 0, 5, 6, 0, 0, 5, 0) {
+		colorModel = rgb565ColorModel{}
+	} else if detectColorMode(16, 8, 0, 8, 8, 0, 0, 8, 0) {
+		colorModel = rgb888ColorModel{}
+	} else {
+		return nil, errors.New(fmt.Sprintf("unsupported color model.\n"+
+			"      offset length  msb_right\n"+
+			"red:   %04v   %04v   %04v\n"+
+			"green: %04v   %04v   %04v\n"+
+			"blue:  %04v   %04v   %04v\n",
+			varInfo.red.offset, varInfo.red.length, varInfo.red.msb_right,
+			varInfo.green.offset, varInfo.green.length, varInfo.green.msb_right,
+			varInfo.blue.offset, varInfo.blue.length, varInfo.blue.msb_right))
+	}
 	return &Device{
 		file,
 		pixels,
@@ -82,8 +105,8 @@ type Device struct {
 // Close unmaps the framebuffer memory and closes the device file. Call this
 // function when you are done using the frame buffer.
 func (d *Device) Close() {
-	syscall.Munmap(d.pixels)
-	d.file.Close()
+	_ = syscall.Munmap(d.pixels)
+	_ = d.file.Close()
 }
 
 // Bounds implements the image.Image (and draw.Image) interface.
@@ -122,63 +145,4 @@ func (d *Device) Set(x, y int, c color.Color) {
 			d.pixels[i] = byte(rgb & 0xFF)
 		}
 	}
-}
-
-// The default color model under the Raspberry Pi is RGB 565. Each pixel is
-// represented by two bytes, with 5 bits for red, 6 bits for green and 5 bits
-// for blue. There is no alpha channel, so alpha is assumed to always be 100%
-// opaque.
-// This shows the memory layout of a pixel:
-//
-//    bit 76543210  76543210
-//        RRRRRGGG  GGGBBBBB
-//       high byte  low byte
-type rgb565ColorModel struct{}
-
-func (rgb565ColorModel) Convert(c color.Color) color.Color {
-	r, g, b, _ := c.RGBA()
-	return toRGB565(r, g, b)
-}
-
-// toRGB565 helps convert a color.Color to rgb565. In a color.Color each
-// channel is represented by the lower 16 bits in a uint32 so the maximum value
-// is 0xFFFF. This function simply uses the highest 5 or 6 bits of each channel
-// as the RGB values.
-func toRGB565(r, g, b uint32) rgb565 {
-	// RRRRRGGGGGGBBBBB
-	return rgb565((r & 0xF800) +
-		((g & 0xFC00) >> 5) +
-		((b & 0xF800) >> 11))
-}
-
-// rgb565 implements the color.Color interface.
-type rgb565 uint16
-
-// RGBA implements the color.Color interface.
-func (c rgb565) RGBA() (r, g, b, a uint32) {
-	// To convert a color channel from 5 or 6 bits back to 16 bits, the short
-	// bit pattern is duplicated to fill all 16 bits.
-	// For example the green channel in rgb565 is the middle 6 bits:
-	//     00000GGGGGG00000
-	//
-	// To create a 16 bit channel, these bits are or-ed together starting at the
-	// highest bit:
-	//     GGGGGG0000000000 shifted << 5
-	//     000000GGGGGG0000 shifted >> 1
-	//     000000000000GGGG shifted >> 7
-	//
-	// These patterns map the minimum (all bits 0) and maximum (all bits 1)
-	// 5 and 6 bit channel values to the minimum and maximum 16 bit channel
-	// values.
-	//
-	// Alpha is always 100% opaque since this model does not support
-	// transparency.
-	rBits := uint32(c & 0xF800) // RRRRR00000000000
-	gBits := uint32(c & 0x7E0)  // 00000GGGGGG00000
-	bBits := uint32(c & 0x1F)   // 00000000000BBBBB
-	r = uint32(rBits | rBits>>5 | rBits>>10 | rBits>>15)
-	g = uint32(gBits<<5 | gBits>>1 | gBits>>7)
-	b = uint32(bBits<<11 | bBits<<6 | bBits<<1 | bBits>>4)
-	a = 0xFFFF
-	return
 }
