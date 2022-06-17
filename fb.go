@@ -16,8 +16,8 @@ struct fb_var_screeninfo getVarScreenInfo(int fd) {
 	return info;
 }
 */
+import "C"
 import (
-	"C"
 	"errors"
 	"fmt"
 	"image"
