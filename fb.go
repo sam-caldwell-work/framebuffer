@@ -21,12 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"os"
 	"syscall"
 )
 
-func Open(device string) (*Device, error) {
+func Open(fbDevice string) (*Device, error) {
 	/*
 			Open expects a framebuffer device as its argument (such
 		    as "/dev/fb0"). The device will be memory-mapped to a
@@ -38,21 +37,27 @@ func Open(device string) (*Device, error) {
 		    are done using the Device, call Close on it to unmap
 		    the memory and close the framebuffer file.
 	*/
-	file, err := os.OpenFile(device, os.O_RDWR, os.ModeDevice)
+	var device Device
+	var err error
+
+	device.file, err = os.OpenFile(fbDevice, os.O_RDWR, os.ModeDevice)
 	if err != nil {
 		return nil, err
 	}
 
-	fixInfo := C.getFixScreenInfo(C.int(file.Fd()))
-	varInfo := C.getVarScreenInfo(C.int(file.Fd()))
+	fixInfo := C.getFixScreenInfo(C.int(device.file.Fd()))
+	device.pitch = int(fixInfo.line_length)
 
-	pixels, err := syscall.Mmap(
-		int(file.Fd()),
+	varInfo := C.getVarScreenInfo(C.int(device.file.Fd()))
+	device.bounds = image.Rect(0, 0, int(varInfo.xres), int(varInfo.yres))
+
+	device.pixels, err = syscall.Mmap(
+		int(device.file.Fd()),
 		0, int(varInfo.xres*varInfo.yres*varInfo.bits_per_pixel/8),
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED,
 	)
 	if err != nil {
-		_ = file.Close()
+		_ = device.file.Close()
 		return nil, err
 	}
 
@@ -79,20 +84,23 @@ func Open(device string) (*Device, error) {
 			varInfo.green.offset == goff && varInfo.green.length == glen && varInfo.green.msb_right == gmsb &&
 			varInfo.blue.offset == boff && varInfo.blue.length == blen && varInfo.blue.msb_right == bmsb
 	}
-	var colorModel color.Model
 	if detectColorMode(
 		11, 5, 0,
-		5, 6, 0,
+		5, 6, 5, // 5+6+5 = 16bits
 		0, 5, 0) {
 
-		colorModel = rgb565ColorModel{}
+		device.colorModel = rgb565ColorModel{}
+		device.SetFuncPtr = device.SetRgb565
+		device.AtFuncPtr = device.AtRgb565
 
 	} else if detectColorMode(
 		16, 8, 0,
-		8, 8, 0,
-		0, 8, 0) {
+		8, 8, 8, // 8+8+8 = 24bits
+		0, 0, 0) {
 
-		colorModel = rgb888ColorModel{}
+		device.colorModel = rgb888ColorModel{}
+		device.SetFuncPtr = device.Set888
+		device.AtFuncPtr = device.AtRgb888
 		/*
 
 			extend with more color models here...
@@ -108,89 +116,5 @@ func Open(device string) (*Device, error) {
 			varInfo.green.offset, varInfo.green.length, varInfo.green.msb_right,
 			varInfo.blue.offset, varInfo.blue.length, varInfo.blue.msb_right))
 	}
-	return &Device{
-		file,
-		pixels,
-		int(fixInfo.line_length),
-		image.Rect(0, 0, int(varInfo.xres), int(varInfo.yres)),
-		colorModel,
-	}, nil
-}
-
-/*
-	Device represents the frame buffer. It implements the draw.Image
-	interface.
-*/
-type Device struct {
-	file       *os.File
-	pixels     []byte
-	pitch      int
-	bounds     image.Rectangle
-	colorModel color.Model
-}
-
-func (d *Device) Close() error {
-	/*
-		Close unmaps the framebuffer memory and closes the device
-		file. Call this function when you are done using the frame
-		buffer.
-	*/
-	if err := syscall.Munmap(d.pixels); err != nil {
-		return err
-	}
-	if err := d.file.Close(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (d *Device) Bounds() image.Rectangle {
-	/*
-		Bounds implements the image.Image (and draw.Image)
-		interface.
-	*/
-	return d.bounds
-}
-
-func (d *Device) ColorModel() color.Model {
-	/*
-		ColorModel implements the image.Image
-		(and draw.Image) interface.
-	*/
-	return d.colorModel
-}
-
-func (d *Device) At(x, y int) color.Color {
-	/*
-		At implements the image.Image (and draw.Image) interface.
-	*/
-	if x < d.bounds.Min.X || x >= d.bounds.Max.X ||
-		y < d.bounds.Min.Y || y >= d.bounds.Max.Y {
-		return rgb565(0)
-	}
-	i := y*d.pitch + 2*x
-	return rgb565(d.pixels[i+1])<<8 | rgb565(d.pixels[i])
-}
-
-func (d *Device) Set(x, y int, c color.Color) {
-	/*
-		Set implements the draw.Image interface.
-	*/
-	// the min bounds are at 0,0 (see Open)
-	if x >= 0 && x < d.bounds.Max.X &&
-		y >= 0 && y < d.bounds.Max.Y {
-		r, g, b, a := c.RGBA()
-		if a > 0 {
-			rgb := toRGB565(r, g, b)
-			i := y*d.pitch + 2*x
-			/*
-				This assumes a little endian system which is the default
-				for Raspbian for which this project was originally developed.
-				The d.pixels indices have to be swapped if the target system
-				is big endian.
-			*/
-			d.pixels[i+1] = byte(rgb >> 8)
-			d.pixels[i] = byte(rgb & 0xFF)
-		}
-	}
+	return &device, nil
 }
