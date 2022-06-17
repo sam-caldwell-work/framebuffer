@@ -52,21 +52,27 @@ func Open(device string) (*Device, error) {
 		_ = file.Close()
 		return nil, err
 	}
+	detectColorMode := func(
+		roff C.uint, goff C.uint, boff C.uint,
+		rlen C.uint, glen C.uint, blen C.uint,
+		rmsb C.uint, gmsb C.uint, bmsb C.uint) bool {
+		/*
+				Detect the color mode based on the given inputs...
 
-	isRgb565 := func() bool {
-		return varInfo.red.offset == 11 && varInfo.red.length == 5 && varInfo.red.msb_right == 0 &&
-			varInfo.green.offset == 5 && varInfo.green.length == 6 && varInfo.green.msb_right == 0 &&
-			varInfo.blue.offset == 0 && varInfo.blue.length == 5 && varInfo.blue.msb_right == 0
-	}
-	isRgb888 := func() bool {
-		return varInfo.red.offset == 16 && varInfo.red.length == 8 && varInfo.red.msb_right == 0 &&
-			varInfo.green.offset == 8 && varInfo.green.length == 8 && varInfo.green.msb_right == 0 &&
-			varInfo.blue.offset == 0 && varInfo.blue.length == 8 && varInfo.blue.msb_right == 0
+					color|offset|length|msb_right
+			          red| roff |rlen  |rmsb
+			        green| goff |glen  |gmsb
+			         blue| boff |blen  |bmsb
+				return bool (true: detected, false: not detected).
+		*/
+		return varInfo.red.offset == roff && varInfo.red.length == rlen && varInfo.red.msb_right == rmsb &&
+			varInfo.green.offset == goff && varInfo.green.length == glen && varInfo.green.msb_right == gmsb &&
+			varInfo.blue.offset == boff && varInfo.blue.length == blen && varInfo.blue.msb_right == bmsb
 	}
 	var colorModel color.Model
-	if isRgb565() {
+	if detectColorMode(11, 5, 0, 5, 6, 0, 0, 5, 0) {
 		colorModel = rgb565ColorModel{}
-	} else if isRgb888() {
+	} else if detectColorMode(16, 8, 0, 8, 8, 0, 0, 8, 0) {
 		colorModel = rgb888ColorModel{}
 	} else {
 		return nil, errors.New(fmt.Sprintf("unsupported color model.\n"+
@@ -78,7 +84,6 @@ func Open(device string) (*Device, error) {
 			varInfo.green.offset, varInfo.green.length, varInfo.green.msb_right,
 			varInfo.blue.offset, varInfo.blue.length, varInfo.blue.msb_right))
 	}
-
 	return &Device{
 		file,
 		pixels,
@@ -100,8 +105,8 @@ type Device struct {
 // Close unmaps the framebuffer memory and closes the device file. Call this
 // function when you are done using the frame buffer.
 func (d *Device) Close() {
-	syscall.Munmap(d.pixels)
-	d.file.Close()
+	_ = syscall.Munmap(d.pixels)
+	_ = d.file.Close()
 }
 
 // Bounds implements the image.Image (and draw.Image) interface.
