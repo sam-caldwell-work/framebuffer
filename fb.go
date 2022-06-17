@@ -19,6 +19,7 @@ struct fb_var_screeninfo getVarScreenInfo(int fd) {
 import "C"
 import (
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"os"
@@ -48,17 +49,26 @@ func Open(device string) (*Device, error) {
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED,
 	)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
-
+	isRgb565 := func() bool {
+		return varInfo.red.offset == 11 && varInfo.red.length == 5 && varInfo.red.msb_right == 0 &&
+			varInfo.green.offset == 5 && varInfo.green.length == 6 && varInfo.green.msb_right == 0 &&
+			varInfo.blue.offset == 0 && varInfo.blue.length == 5 && varInfo.blue.msb_right == 0
+	}
 	var colorModel color.Model
-	if varInfo.red.offset == 11 && varInfo.red.length == 5 && varInfo.red.msb_right == 0 &&
-		varInfo.green.offset == 5 && varInfo.green.length == 6 && varInfo.green.msb_right == 0 &&
-		varInfo.blue.offset == 0 && varInfo.blue.length == 5 && varInfo.blue.msb_right == 0 {
+	if isRgb565(varInfo) {
 		colorModel = rgb565ColorModel{}
 	} else {
-		return nil, errors.New("unsupported color model")
+		return nil, errors.New(fmt.Sprintf("unsupported color model.\n"+
+			"      offset length  msb_right\n"+
+			"red:   %04v   %04v   %04v\n"+
+			"green: %04v   %04v   %04v\n"+
+			"blue:  %04v   %04v   %04v\n",
+			varInfo.red.offset, varInfo.red.length, varInfo.red.msb_right,
+			varInfo.green.offset, varInfo.green.length, varInfo.green.msb_right,
+			varInfo.blue.offset, varInfo.blue.length, varInfo.blue.msb_right))
 	}
 
 	return &Device{
