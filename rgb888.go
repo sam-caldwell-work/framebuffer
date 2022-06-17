@@ -24,28 +24,39 @@ func (rgb888ColorModel) Convert(c color.Color) color.Color {
 // is 0xFFFFFF (The "hex code for white"...or my first Algebra grades).
 // This function simply uses the highest 24 bites of each channel
 // as the RGB values.
+const (
+	redMask888    = 0xFF0000
+	greenMask888  = 0x00FF00
+	blueMask888   = 0x0000FF
+	redShift888   = 16
+	greenShift888 = 8
+	blueShift888  = 0
+)
+
 func toRGB888(r, g, b uint32) rgb888 {
 	// RRRR RRRR GGGG GGGG BBBB BBBB
-	return rgb888((r & 0xF800) +
-		((g & 0xFC00) >> 5) +
-		((b & 0xF800) >> 11))
+	return rgb888(
+		((r & redMask888) >> redShift888) +
+			((g & greenMask888) >> greenShift888) +
+			((b & blueMask888) >> blueShift888))
 }
 
 // RGBA implements the color.Color interface.
 func (c rgb888) RGBA() (r, g, b, a uint32) {
-	// To convert a color channel from 5 or 6 bits back to 16 bits, the short
-	// bit pattern is duplicated to fill all 16 bits.
+	// To convert a color channel from 8 bits back to 32 bits, the short
+	// bit pattern is duplicated to fill all 32 bits.
 	// For example the green channel in rgb888 is the middle 8 bits:
 	//     0000 0000 GGGG GGGG 0000 0000
 	//
 	// Alpha is always 100% opaque since this model does not support
 	// transparency.
-	rBits := uint32(c & 0xF800) // RRRR RRRR 0000 0000 0000 0000
-	gBits := uint32(c & 0x7E0)  // 0000 0000 GGGG GGGG 0000 0000
-	bBits := uint32(c & 0x1F)   // 0000 0000 0000 0000 BBBB BBBB
-	r = uint32(rBits | rBits>>5 | rBits>>10 | rBits>>15)
-	g = uint32(gBits<<5 | gBits>>1 | gBits>>7)
-	b = uint32(bBits<<11 | bBits<<6 | bBits<<1 | bBits>>4)
-	a = 0xFFFF
+	rBits := uint32(c & redMask888)   // RRRR RRRR 0000 0000 0000 0000
+	gBits := uint32(c & greenMask888) // 0000 0000 GGGG GGGG 0000 0000
+	bBits := uint32(c & blueMask888)  // 0000 0000 0000 0000 BBBB BBBB
+
+	r = uint32(rBits >> redShift888)   // 0000 0000 0000 0000 RRRR RRRR
+	g = uint32(gBits >> greenShift888) // 0000 0000 0000 0000 GGGG GGGG
+	b = uint32(bBits >> blueShift888)  // 0000 0000 0000 0000 BBBB BBBB
+	a = 0xFFFF                         //default alpha to 100% opaque
 	return
 }
