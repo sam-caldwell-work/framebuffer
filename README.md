@@ -18,7 +18,7 @@ Here is a simple example that clears the whole screen to a dark magenta:
 package main
 
 import (
-	"github.com/gonutz/framebuffer"
+	"github.com/samuel-caldwell-sands/framebuffer"
 	"image"
 	"image/color"
 	"image/draw"
@@ -32,6 +32,6 @@ func main() {
 	defer fb.Close()
 
 	magenta := image.NewUniform(color.RGBA{255, 0, 128, 255})
-	draw.Draw(fb, fb.Bounds(), magenta, image.ZP, draw.Src)
+	draw.Draw(fb, fb.Bounds(), magenta, image.Point{}, draw.Src)
 }
 ```
